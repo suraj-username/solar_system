@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { TextureLoader } from 'three';
 
 // 1. Create the scene
@@ -14,11 +15,43 @@ camera.position.set(0, 50, 150); // Set further back to see the full system
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
+renderer.xr.enabled = true; // Enable WebXR for VR
+
+// Add VR button to the document
+VRButton.createButton(renderer);
+
+// Get the VR enable and disable buttons
+const enableVRButton = document.getElementById('enableVR');
+const disableVRButton = document.getElementById('disableVR');
 
 // 4. Add orbit controls (for mouse interaction)
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
+
+// Function to enable orbit controls
+function enableOrbit() {
+    controls.enabled = true;
+    camera.position.set(0, 50, 150);
+    controls.update();
+    enableVRButton.style.display = 'block';
+    disableVRButton.style.display = 'none';
+    renderer.xr.enabled = false;
+    renderer.setAnimationLoop(animate); // Restart normal animation loop
+}
+
+// Function to disable orbit controls and enter VR
+function enableVR() {
+    controls.enabled = false;
+    enableVRButton.style.display = 'none';
+    disableVRButton.style.display = 'block';
+    renderer.xr.enabled = true;
+    renderer.setAnimationLoop(renderer.render); // Use VR render loop
+}
+
+// Event listeners for the VR buttons
+enableVRButton.addEventListener('click', enableVR);
+disableVRButton.addEventListener('click', enableOrbit);
 
 // 5. Add lights
 const ambientLight = new THREE.AmbientLight(0x404040);
@@ -60,6 +93,7 @@ document.body.appendChild(scaleToggle);
 let useRealisticScale = false;
 let currentPlanets = [];
 let currentAsteroidBelt = null;
+let currentSunSystem = null;
 
 // Texture loader
 const textureLoader = new TextureLoader();
@@ -88,32 +122,32 @@ let CURRENT_SCALE = VISUAL_SCALE;
 function createEllipticalOrbit(semiMajorAxis, eccentricity, inclination, longitudeOfAscendingNode) {
     const points = [];
     const segments = 128;
-    
+
     // Apply the inclination factor to make orbital planes more visible
     const adjustedInclination = inclination * CURRENT_SCALE.INCLINATION_FACTOR;
-    
+
     for (let i = 0; i <= segments; i++) {
         const theta = (i / segments) * Math.PI * 2;
-        
+
         // Calculate radius at this angle (polar form of ellipse equation)
-        const radius = semiMajorAxis * (1 - eccentricity * eccentricity) / 
+        const radius = semiMajorAxis * (1 - eccentricity * eccentricity) /
                       (1 + eccentricity * Math.cos(theta));
-        
+
         // Convert polar to Cartesian coordinates
         const x = radius * Math.cos(theta);
         const z = radius * Math.sin(theta);
-        
+
         // Apply inclination rotation
         const y = z * Math.sin(adjustedInclination);
         const adjustedZ = z * Math.cos(adjustedInclination);
-        
+
         // Apply longitude of ascending node rotation
         const finalX = x * Math.cos(longitudeOfAscendingNode) - adjustedZ * Math.sin(longitudeOfAscendingNode);
         const finalZ = x * Math.sin(longitudeOfAscendingNode) + adjustedZ * Math.cos(longitudeOfAscendingNode);
-        
+
         points.push(new THREE.Vector3(finalX, y, finalZ));
     }
-    
+
     // Create a curve from the points
     const curve = new THREE.CatmullRomCurve3(points);
     return curve;
@@ -123,7 +157,7 @@ function createEllipticalOrbit(semiMajorAxis, eccentricity, inclination, longitu
 function createOrbitLine(curve, color = 0x888888) {
     const points = curve.getPoints(128);
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({ 
+    const material = new THREE.LineBasicMaterial({
         color: color,
         transparent: true,
         opacity: 0.3
@@ -151,7 +185,7 @@ function createSun() {
     });
     const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
     scene.add(sunGlow);
-    
+
     return { sun, sunGlow };
 }
 
@@ -160,34 +194,34 @@ function createPlanet(name, radius, distance, eccentricity, color, orbitalPeriod
     // Scale radius and distance
     const scaledRadius = radius * CURRENT_SCALE.SIZE_SCALE;
     const scaledDistance = distance * CURRENT_SCALE.DISTANCE_SCALE;
-    
+
     // Calculate orbital parameters
     const semiMajorAxis = scaledDistance;
     const adjustedEccentricity = eccentricity;
-    
+
     // Create the planet
     const geometry = new THREE.SphereGeometry(scaledRadius, 32, 32);
     const material = new THREE.MeshStandardMaterial({ color });
     const planet = new THREE.Mesh(geometry, material);
-    
+
     // Create an orbit path
     const orbitCurve = createEllipticalOrbit(
-        semiMajorAxis, 
+        semiMajorAxis,
         adjustedEccentricity,
         inclination * (Math.PI / 180), // Convert degrees to radians
         longitudeOfAscendingNode * (Math.PI / 180)
     );
     const orbitLine = createOrbitLine(orbitCurve);
     scene.add(orbitLine);
-    
+
     // Create a container for the planet
     const axisHelper = new THREE.Group();
     axisHelper.add(planet);
     scene.add(axisHelper);
-    
+
     // Apply axial tilt
     planet.rotation.x = axialTilt * (Math.PI / 180);
-    
+
     // Add reference grid to visualize orbital plane
     if (name === "Earth") {
         const gridHelper = new THREE.GridHelper(scaledDistance * 2, 10, 0x0000ff, 0x0000ff);
@@ -195,7 +229,7 @@ function createPlanet(name, radius, distance, eccentricity, color, orbitalPeriod
         gridHelper.material.opacity = 0.1;
         scene.add(gridHelper);
     }
-    
+
     // Store planet data for animation
     return {
         name,
@@ -222,47 +256,47 @@ function createPlanet(name, radius, distance, eccentricity, color, orbitalPeriod
 function createMoon(parentPlanet, radius, distance, color, orbitalPeriod, inclination = 0) {
     const scaledRadius = radius * CURRENT_SCALE.SIZE_SCALE * 2; // Moons scaled larger to be visible
     const scaledDistance = distance * CURRENT_SCALE.SIZE_SCALE * 10; // Scale moon distances differently
-    
+
     // Create the moon
     const geometry = new THREE.SphereGeometry(scaledRadius, 16, 16);
     const material = new THREE.MeshStandardMaterial({ color });
     const moon = new THREE.Mesh(geometry, material);
-    
+
     // Create a lunar orbit path
     const points = [];
     const segments = 64;
-    
+
     for (let i = 0; i <= segments; i++) {
         const theta = (i / segments) * Math.PI * 2;
         const x = scaledDistance * Math.cos(theta);
         const z = scaledDistance * Math.sin(theta);
-        
+
         // Apply inclination
         const y = z * Math.sin(inclination * (Math.PI / 180));
         const adjustedZ = z * Math.cos(inclination * (Math.PI / 180));
-        
+
         points.push(new THREE.Vector3(x, y, adjustedZ));
     }
-    
+
     const orbitGeometry = new THREE.BufferGeometry().setFromPoints(points);
-    const orbitMaterial = new THREE.LineBasicMaterial({ 
+    const orbitMaterial = new THREE.LineBasicMaterial({
         color: 0x444444,
         transparent: true,
         opacity: 0.3
     });
     const orbit = new THREE.Line(orbitGeometry, orbitMaterial);
-    
+
     // Create a container for the moon and its orbit
     const moonSystem = new THREE.Group();
     moonSystem.add(moon);
     moonSystem.add(orbit);
-    
+
     // Position the moon along its orbit
     moon.position.x = scaledDistance;
-    
+
     // Add the moon system to the parent planet's axis helper
     parentPlanet.axisHelper.add(moonSystem);
-    
+
     return {
         moon,
         orbitalPeriod,
@@ -277,21 +311,21 @@ function createAsteroidBelt() {
     // The asteroid belt is located between Mars and Jupiter (approximately 2.2 to 3.2 AU from the Sun)
     const marsDistance = 22 * CURRENT_SCALE.DISTANCE_SCALE;
     const jupiterDistance = 34 * CURRENT_SCALE.DISTANCE_SCALE;
-    
+
     const minRadius = marsDistance * 1.2; // Just outside Mars' orbit
     const maxRadius = jupiterDistance * 0.8; // Just inside Jupiter's orbit
-    
+
     // Asteroid belt visualization parameters
     const asteroidCount = 5000; // More asteroids for better visibility
     const beltHeight = 4 * CURRENT_SCALE.DISTANCE_SCALE; // Increased belt thickness
-    
+
     // Asteroid size parameters
     const minSize = 0.1 * CURRENT_SCALE.SIZE_SCALE; // Larger minimum size for visibility
     const maxSize = 0.4 * CURRENT_SCALE.SIZE_SCALE; // Larger maximum size for visibility
-    
+
     // Create a group for the asteroids
     const asteroids = new THREE.Group();
-    
+
     // Create a visualization of the asteroid belt as a ring
     const beltRingGeometry = new THREE.RingGeometry(minRadius, maxRadius, 128);
     const beltRingMaterial = new THREE.MeshBasicMaterial({
@@ -303,22 +337,22 @@ function createAsteroidBelt() {
     const beltRing = new THREE.Mesh(beltRingGeometry, beltRingMaterial);
     beltRing.rotation.x = Math.PI / 2;
     scene.add(beltRing);
-    
+
     // Create individual asteroids
     for (let i = 0; i < asteroidCount; i++) {
         // Random radius within the belt
         const radius = minRadius + Math.random() * (maxRadius - minRadius);
-        
+
         // Random position on the circle at this radius
         const theta = Math.random() * Math.PI * 2;
-        
+
         // Add some height variance (belt thickness)
         const height = (Math.random() - 0.5) * beltHeight;
-        
+
         // Create asteroid
         const size = minSize + Math.random() * (maxSize - minSize);
         const asteroidGeometry = new THREE.IcosahedronGeometry(size, 0);
-        
+
         // Vary the color slightly for visual interest
         const colorValue = 0.6 + Math.random() * 0.4;
         const asteroidMaterial = new THREE.MeshStandardMaterial({
@@ -326,27 +360,27 @@ function createAsteroidBelt() {
             roughness: 0.8,
             metalness: Math.random() * 0.5
         });
-        
+
         const asteroid = new THREE.Mesh(asteroidGeometry, asteroidMaterial);
-        
+
         // Apply a random inclination to the asteroid's orbit
         const inclination = (Math.random() - 0.5) * Math.PI * 0.3; // Random inclination up to ±27 degrees
-        
+
         // Position asteroid with inclination
         asteroid.position.x = radius * Math.cos(theta);
         asteroid.position.y = height + radius * Math.sin(theta) * Math.sin(inclination);
         asteroid.position.z = radius * Math.sin(theta) * Math.cos(inclination);
-        
+
         // Random rotation and scale for variety
         asteroid.rotation.x = Math.random() * Math.PI;
         asteroid.rotation.y = Math.random() * Math.PI;
         asteroid.rotation.z = Math.random() * Math.PI;
         asteroid.scale.set(
-            0.5 + Math.random(), 
-            0.5 + Math.random(), 
+            0.5 + Math.random(),
+            0.5 + Math.random(),
             0.5 + Math.random()
         );
-        
+
         // Store original position data for animation
         asteroid.userData = {
             radius,
@@ -355,10 +389,10 @@ function createAsteroidBelt() {
             inclination,
             speed: 0.0002 + Math.random() * 0.0006
         };
-        
+
         asteroids.add(asteroid);
     }
-    
+
     scene.add(asteroids);
     return { asteroids, beltRing };
 }
@@ -370,7 +404,7 @@ function createSolarSystem() {
         scene.remove(currentSunSystem.sun);
         scene.remove(currentSunSystem.sunGlow);
     }
-    
+
     if (currentPlanets.length > 0) {
         currentPlanets.forEach(planet => {
             scene.remove(planet.axisHelper);
@@ -378,16 +412,16 @@ function createSolarSystem() {
         });
         currentPlanets = [];
     }
-    
+
     if (currentAsteroidBelt) {
         scene.remove(currentAsteroidBelt.asteroids);
         scene.remove(currentAsteroidBelt.beltRing);
         currentAsteroidBelt = null;
     }
-    
+
     // Create new solar system
     const sunSystem = createSun();
-    
+
     // Create planets with accurate relative sizes, distances, and orbital parameters
     // Values are approximations to maintain visual interest while being more accurate than before
     const planets = [
@@ -404,8 +438,8 @@ function createSolarSystem() {
 
     // Add rings to Saturn
     const saturnRingGeometry = new THREE.RingGeometry(
-        9.4 * CURRENT_SCALE.SIZE_SCALE * 1.2, 
-        9.4 * CURRENT_SCALE.SIZE_SCALE * 2.3, 
+        9.4 * CURRENT_SCALE.SIZE_SCALE * 1.2,
+        9.4 * CURRENT_SCALE.SIZE_SCALE * 2.3,
         64
     );
     const saturnRingMaterial = new THREE.MeshStandardMaterial({
@@ -420,8 +454,8 @@ function createSolarSystem() {
 
     // Add rings to Uranus (fainter than Saturn's)
     const uranusRingGeometry = new THREE.RingGeometry(
-        4.0 * CURRENT_SCALE.SIZE_SCALE * 1.5, 
-        4.0 * CURRENT_SCALE.SIZE_SCALE * 1.8, 
+        4.0 * CURRENT_SCALE.SIZE_SCALE * 1.5,
+        4.0 * CURRENT_SCALE.SIZE_SCALE * 1.8,
         64
     );
     const uranusRingMaterial = new THREE.MeshStandardMaterial({
@@ -461,7 +495,7 @@ function createSolarSystem() {
 
     // Create the asteroid belt
     const asteroidBelt = createAsteroidBelt();
-    
+
     // Add label for the asteroid belt
     const beltLabelDiv = document.createElement('div');
     beltLabelDiv.className = 'beltLabel';
@@ -474,12 +508,12 @@ function createSolarSystem() {
     beltLabelDiv.style.borderRadius = '4px';
     beltLabelDiv.style.fontSize = '12px';
     document.body.appendChild(beltLabelDiv);
-    
+
     // Store the current solar system
     currentSunSystem = sunSystem;
     currentPlanets = planets;
     currentAsteroidBelt = asteroidBelt;
-    
+
     return { sunSystem, planets, asteroidBelt };
 }
 
@@ -490,19 +524,19 @@ function createStarfield() {
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
     const sizes = new Float32Array(starCount);
-    
+
     for (let i = 0; i < starCount; i++) {
         const i3 = i * 3;
-        
+
         // Position stars in a sphere around the scene
         const radius = 1000;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos((Math.random() * 2) - 1);
-        
+
         positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
         positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
         positions[i3 + 2] = radius * Math.cos(phi);
-        
+
         // Randomize star colors slightly
         const colorChoice = Math.random();
         if (colorChoice > 0.95) {
@@ -522,31 +556,30 @@ function createStarfield() {
             colors[i3 + 1] = brightness;
             colors[i3 + 2] = brightness;
         }
-        
+
         // Random star sizes
         sizes[i] = Math.random() * 2;
     }
-    
+
     starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     starsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     starsGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
+
     const starsMaterial = new THREE.PointsMaterial({
         size: 1.5,
         vertexColors: true,
         transparent: true,
         opacity: 0.8
     });
-    
+
     const starField = new THREE.Points(starsGeometry, starsMaterial);
     scene.add(starField);
-    
+
     return starField;
 }
 
 // Create initial solar system and starfield
 const starField = createStarfield();
-let currentSunSystem = null;
 const { sunSystem, planets, asteroidBelt } = createSolarSystem();
 currentSunSystem = sunSystem;
 
@@ -581,11 +614,11 @@ function focusAsteroidBelt() {
     const marsDistance = 22 * CURRENT_SCALE.DISTANCE_SCALE;
     const jupiterDistance = 34 * CURRENT_SCALE.DISTANCE_SCALE;
     const beltCenter = (marsDistance + jupiterDistance) / 2;
-    
+
     // Set camera position to view belt from above
     controls.target.set(0, 0, 0);
     camera.position.set(beltCenter/2, beltCenter/2, beltCenter/2);
-    
+
     // Update info display
     infoElement.innerHTML = 'Viewing: Asteroid Belt<br>Located between Mars and Jupiter';
 }
@@ -595,12 +628,12 @@ function focusPlanet(index) {
     if (index >= 0 && index < currentPlanets.length) {
         const target = currentPlanets[index].planet.position.clone();
         controls.target.copy(target);
-        
+
         // Position camera at a distance relative to planet size
         const offset = new THREE.Vector3(0, 5, 20);
         const cameraPosition = target.clone().add(offset);
         camera.position.copy(cameraPosition);
-        
+
         // Update info display
         infoElement.innerHTML = `Viewing: ${currentPlanets[index].name}`;
     } else if (index === -1) {
@@ -614,7 +647,7 @@ function focusPlanet(index) {
 // Toggle scale function
 scaleToggle.addEventListener('click', () => {
     useRealisticScale = !useRealisticScale;
-    
+
     if (useRealisticScale) {
         CURRENT_SCALE = REALISTIC_SCALE;
         scaleToggle.textContent = 'Switch to Visual Scale';
@@ -624,10 +657,10 @@ scaleToggle.addEventListener('click', () => {
         scaleToggle.textContent = 'Switch to Realistic Scale';
         infoElement.innerHTML = 'Visual Scale Mode<br>Planets enlarged for visibility';
     }
-    
+
     // Recreate the solar system with new scale
     createSolarSystem();
-    
+
     // Reset view
     focusPlanet(-1);
 });
@@ -650,47 +683,46 @@ window.addEventListener('keydown', (event) => {
 });
 
 // Animation loop
-// Animation loop
 function animate() {
     requestAnimationFrame(animate);
-    
+
     // Rotate the sun
     currentSunSystem.sun.rotation.y += 0.001;
     currentSunSystem.sunGlow.rotation.y -= 0.0005;
-    
+
     // Animate planets
     currentPlanets.forEach((planet, index) => {
         // Update position along orbital path
         planet.position += 0.001 / planet.orbitalPeriod;
         if (planet.position > 1) planet.position = 0;
-        
+
         // Get position from curve
         const point = planet.curve.getPointAt(planet.position);
         planet.axisHelper.position.copy(point);
-        
+
         // Rotate planet on its axis
         planet.planet.rotation.y += planet.rotationSpeed;
     });
-    
+
     // Animate asteroid belt
     if (currentAsteroidBelt && currentAsteroidBelt.asteroids) {
         currentAsteroidBelt.asteroids.children.forEach(asteroid => {
             // Rotate each asteroid around the sun
             const data = asteroid.userData;
             data.theta += data.speed;
-            
+
             // Calculate position with inclination
             const radius = data.radius;
             asteroid.position.x = radius * Math.cos(data.theta);
             asteroid.position.y = data.height + radius * Math.sin(data.theta) * Math.sin(data.inclination);
             asteroid.position.z = radius * Math.sin(data.theta) * Math.cos(data.inclination);
-            
+
             // Spin the asteroid
             asteroid.rotation.x += 0.01;
             asteroid.rotation.y += 0.01;
         });
     }
-    
+
     controls.update();
     renderer.render(scene, camera);
 }
@@ -698,9 +730,12 @@ animate();
 
 // Instructions for the user
 console.log("Enhanced Solar System Simulation Controls:");
-console.log("- Left mouse button: Rotate view");
-console.log("- Right mouse button: Pan view");
-console.log("- Mouse wheel: Zoom in/out");
+console.log("- Left mouse button: Rotate view (in normal mode)");
+console.log("- Right mouse button: Pan view (in normal mode)");
+console.log("- Mouse wheel: Zoom in/out (in normal mode)");
 console.log("- Keys 1-8: Focus on planets (1=Mercury, 8=Neptune)");
 console.log("- Key R: Reset to overview");
-console.log("- Button: Toggle between visual and realistic scales");
+console.log("- Key A: Focus on asteroid belt");
+console.log("- Button 'Toggle Realistic Scale': Switch between visual and realistic scales");
+console.log("- Button 'Enable VR': Enter VR mode (if VR headset is connected)");
+console.log("- Button 'Disable VR': Return to normal viewing mode");
