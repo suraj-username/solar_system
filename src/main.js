@@ -626,7 +626,9 @@ function focusAsteroidBelt() {
 // Focus camera on a specific planet
 function focusPlanet(index) {
     if (index >= 0 && index < currentPlanets.length) {
-        const target = currentPlanets[index].planet.position.clone();
+        console.log('Focusing on:', currentPlanets[index].name, currentPlanets[index].planet.position);
+
+        const target = currentPlanets[index].axisHelper.position.clone();
         controls.target.copy(target);
 
         // Position camera at a distance relative to planet size
@@ -668,9 +670,10 @@ scaleToggle.addEventListener('click', () => {
 // Initialize keyboard controls for planet focus
 window.addEventListener('keydown', (event) => {
     // Number keys 0-8 (0 for Sun, 1-8 for planets)
-    const key = parseInt(event.key);
-    if (!isNaN(key) && key >= 0 && key <= 8) {
-        focusPlanet(key - 1); // -1 for Sun, 0-7 for planets
+    const key = parseInt(event.key, 10);
+    
+    if (key>=0 && key<=8) {
+        focusPlanet(key-1);
     }
     // Press 'R' to reset view
     if (event.key === 'r' || event.key === 'R') {
